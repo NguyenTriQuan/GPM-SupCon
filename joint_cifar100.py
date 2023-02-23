@@ -20,9 +20,13 @@ import pdb
 import argparse,time
 import math
 from copy import deepcopy
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# temperature = 0.2
 negative_slope = math.sqrt(5)
-wn = True
+feat_dim = 512
+# lamb = 100
+wn = False
+cil = True
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
@@ -66,8 +70,11 @@ class AlexNet(nn.Module):
         self.maxpool=torch.nn.MaxPool2d(2)
         self.relu=torch.nn.ReLU()
         # self.relu=torch.nn.LeakyReLU(negative_slope=negative_slope)
-        self.drop1=torch.nn.Dropout(0.2)
-        self.drop2=torch.nn.Dropout(0.5)
+        # self.drop1=torch.nn.Dropout(0.2)
+        # self.drop2=torch.nn.Dropout(0.5)
+
+        self.drop1=torch.nn.Dropout(0.0)
+        self.drop2=torch.nn.Dropout(0.0)
 
         self.conv3.next_ks = self.smid
         self.fc1 = nn.Linear(256*self.smid*self.smid,2048, bias=False)
@@ -81,17 +88,20 @@ class AlexNet(nn.Module):
         self.map.extend([2048])
         
         self.taskcla = taskcla
-        self.last=torch.nn.ModuleList()
-        for t,n in self.taskcla:
-            self.last.append(torch.nn.Linear(2048,n,bias=False))
+        self.fc3 = nn.Linear(2048, feat_dim, bias=False)
+        self.fc3.next_ks = 1
+        self.map.extend([2048])
+        # self.last=torch.nn.ModuleList()
+        # for t,n in self.taskcla:
+        #     self.last.append(torch.nn.Linear(2048,n,bias=False))
 
         self.gpm_layers = [m for n, m in self.named_modules() if 'fc' in n or 'conv' in n]
         for n, m in self.named_modules():
             if 'fc' in n or 'conv' in n:
                 print(f'layer {n}, next kernel size {m.next_ks}')
-        
         if wn:
             self.initialize()
+        self.features_mean = None
     
     def initialize(self):
         for m in self.gpm_layers:
@@ -103,7 +113,6 @@ class AlexNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
         
     def normalize(self):
-        scales = []
         with torch.no_grad():
             for m in self.gpm_layers:
                 if len(m.weight.shape) == 4:
@@ -116,10 +125,7 @@ class AlexNet(nn.Module):
                 # mean = m.weight.mean(dim=norm_dim).detach().view(norm_view)
                 var = m.weight.var(dim=norm_dim, unbiased=False).detach().sum() * m.next_ks
                 std = var ** 0.5
-                scale = m.gain / std
-                scales.append(scale)
-                m.weight.data = scale * m.weight.data
-        return scales
+                m.weight.data = m.gain * (m.weight.data) / std 
         
     def forward(self, x):
         bsz = deepcopy(x.size(0))
@@ -143,11 +149,12 @@ class AlexNet(nn.Module):
         self.act['fc2']=x        
         x = self.fc2(x)
         x = self.drop2(self.relu(self.bn5(x)))
-        y=[]
-        for t,i in self.taskcla:
-            y.append(self.last[t](x))
-            
-        return y
+        # y=[]
+        # for t,i in self.taskcla:
+        #     y.append(self.last[t](x))
+        self.act['fc3']=x  
+        x = self.fc3(x) 
+        return x
 
 def get_model(model):
     return deepcopy(model.state_dict())
@@ -163,7 +170,114 @@ def adjust_learning_rate(optimizer, epoch, args):
         else:
             param_group['lr'] /= args.lr_factor  
 
-def train(args, model, device, x,y, optimizer,criterion, task_id):
+def sup_con_loss(features, labels, temperature):
+    features = F.normalize(features, dim=1)
+    sim = torch.div(
+        torch.matmul(features, features.T),
+        temperature)
+    logits_max, _ = torch.max(sim, dim=1, keepdim=True)
+    logits = sim - logits_max.detach()
+    pos_mask = (labels.view(-1, 1) == labels.view(1, -1)).float().to(device)
+
+    logits_mask = torch.scatter(
+        torch.ones_like(pos_mask),
+        1,
+        torch.arange(features.shape[0]).view(-1, 1).to(device),
+        0
+    )
+    pos_mask = pos_mask * logits_mask
+
+    exp_logits = torch.exp(logits) * logits_mask
+    log_prob = logits - torch.log(exp_logits.mean(1, keepdim=True))
+
+    mean_log_prob_pos = (pos_mask * log_prob).sum(1) / pos_mask.sum(1)        
+    # loss
+    loss = - mean_log_prob_pos
+    loss = loss.mean()
+
+    return loss
+
+def sup_con_loss_cil(features, labels, features_mean, temperature, lamb):
+    features = F.normalize(features, dim=1)
+    features_mean = F.normalize(features_mean, dim=1)
+    sim = torch.div(
+        torch.matmul(features, features.T),
+        temperature)
+
+    sim_old = torch.div(
+        torch.matmul(features, features_mean.T),
+        temperature)
+    logits_max, _ = torch.max(sim, dim=1, keepdim=True)
+    logits = sim - logits_max.detach()
+    pos_mask = (labels.view(-1, 1) == labels.view(1, -1)).float().to(device)
+
+    logits_max_old, _ = torch.max(sim_old, dim=1, keepdim=True)
+    logits_old = sim_old - logits_max_old.detach()
+
+    logits_mask = torch.scatter(
+        torch.ones_like(pos_mask),
+        1,
+        torch.arange(features.shape[0]).view(-1, 1).to(device),
+        0
+    )
+    pos_mask = pos_mask * logits_mask
+
+    exp_logits = torch.exp(logits) * logits_mask
+    exp_logits_old = torch.exp(logits_old)
+    log_prob = logits - torch.log(exp_logits.mean(1, keepdim=True) + lamb * exp_logits_old.mean(1, keepdim=True))
+
+    mean_log_prob_pos = (pos_mask * log_prob).sum(1) / pos_mask.sum(1)        
+    # loss
+    loss = - mean_log_prob_pos
+    loss = loss.mean()
+
+    return loss
+
+def old_con_loss(features, features_mean, temperature):
+    features = F.normalize(features, dim=1)
+    features_mean = F.normalize(features_mean, dim=1)
+    sim = torch.div(
+        torch.matmul(features, features_mean.T),
+        temperature)
+
+    logits_max, _ = torch.max(sim, dim=1, keepdim=True)
+    logits = sim - logits_max.detach()
+    exp_logits = torch.exp(logits)
+    loss = torch.log(exp_logits.mean(1))
+    return loss.mean()
+
+def get_classes_statistic(args, model, x, y, t):
+        model.eval()
+        features = []
+        labels = []
+        r=np.arange(x.size(0))
+        # np.random.shuffle(r)
+        r=torch.LongTensor(r).to(device)
+        for i in range(0,len(r),args.batch_size_test):
+            if i+args.batch_size_test<=len(r): b=r[i:i+args.batch_size_test]
+            else: b=r[i:]
+            data = x[b]
+            data, target = data.to(device), y[b].to(device)
+            
+            outputs = model(data)
+            features.append(outputs.detach())
+            labels.append(target)
+
+        features = torch.cat(features, dim=0)
+        labels = torch.cat(labels, dim=0)
+        features_mean = []
+        for cla in range(0, 10):
+            ids = (labels == cla)
+            cla_features = features[ids]
+            features_mean.append(cla_features.mean(0))
+
+        features_mean = torch.stack(features_mean, dim=0).to(device)
+        if model.features_mean is None:
+            model.features_mean = features_mean # [num classes, feature dim]
+        else:
+            model.features_mean = torch.cat([model.features_mean[:t*10], features_mean], dim=0)
+        
+def train(args, model, device, x, y, optimizer, criterion, task_id):
     model.train()
     r=np.arange(x.size(0))
     np.random.shuffle(r)
@@ -174,13 +288,16 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         else: b=r[i:]
         data = x[b]
         data, target = data.to(device), y[b].to(device)
+        data = torch.cat([data, data], dim=0)
+        target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
         output = model(data)
-        loss = criterion(output[task_id], target)        
+        loss = sup_con_loss(output, target, args.temperature)        
         loss.backward()
         optimizer.step()
         if wn:
             model.normalize()
+    get_classes_statistic(args, model, x, y, task_id)
 
 def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_id):
     model.train()
@@ -193,9 +310,17 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         else: b=r[i:]
         data = x[b]
         data, target = data.to(device), y[b].to(device)
+        data = torch.cat([data, data], dim=0)
+        target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
         output = model(data)
-        loss = criterion(output[task_id], target)         
+        if cil and task_id > 0:
+            if args.split_loss == 0:
+                loss = sup_con_loss_cil(output, target, model.features_mean[:task_id*10], args.temperature, args.lamb)
+            else:
+                loss = sup_con_loss(output, target) + args.lamb * old_con_loss(output, model.features_mean[:task_id*10], args.temperature)
+        else:
+            loss = sup_con_loss(output, target, args.temperature)  
         loss.backward()
         # Gradient Projections 
         kk = 0 
@@ -212,9 +337,8 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
 
         optimizer.step()
         if wn:
-            scales = model.normalize()
-            # for n, m in enumerate(model.gpm_layers[1:]):
-            #     feature_mat[n+1] = feature_mat[n+1] * (scales[n] ** 2)
+            model.normalize()
+    get_classes_statistic(args, model, x, y, task_id)
 
 def test(args, model, device, x, y, criterion, task_id):
     model.eval()
@@ -232,18 +356,22 @@ def test(args, model, device, x, y, criterion, task_id):
             data = x[b]
             data, target = data.to(device), y[b].to(device)
             output = model(data)
-            loss = criterion(output[task_id], target)
-            pred = output[task_id].argmax(dim=1, keepdim=True) 
-            
+            output = F.normalize(output, dim=1)
+            if cil:
+                target += task_id*10
+                features_mean = model.features_mean
+            else:
+                features_mean = model.features_mean[task_id*10: (task_id+1)*10]
+            features_mean = F.normalize(features_mean, dim=1)
+            pred = torch.matmul(output, features_mean.T)
+            pred = pred.argmax(dim=1, keepdim=True) 
             correct    += pred.eq(target.view_as(pred)).sum().item()
-            total_loss += loss.data.cpu().numpy().item()*len(b)
             total_num  += len(b)
 
     acc = 100. * correct / total_num
-    final_loss = total_loss / total_num
-    return final_loss, acc
+    return 0, acc
 
-def get_representation_matrix (net, device, x, y=None): 
+def get_representation_matrix(net, device, x, y=None): 
     # Collect activations by forward pass
     r=np.arange(x.size(0))
     np.random.shuffle(r)
@@ -251,10 +379,9 @@ def get_representation_matrix (net, device, x, y=None):
     b=r[0:125] # Take 125 random samples 
     example_data = x[b]
     example_data = example_data.to(device)
-    net.eval()
     example_out  = net(example_data)
     
-    batch_list=[2*12,100,100,125,125] 
+    batch_list=[2*12,100,100,125,125,125] 
     mat_list=[]
     act_key=list(net.act.keys())
     for i in range(len(net.map)):
@@ -353,7 +480,7 @@ def main(args):
     task_list = []
     for k,ncla in taskcla:
         # specify threshold hyperparameter
-        threshold = np.array([0.97] * 5) + task_id*np.array([0.003] * 5)
+        threshold = np.array([0.97] * 6) + task_id*np.array([0.003] * 6)
      
         print('*'*100)
         print('Task {:2d} ({:s})'.format(k,data[k]['name']))
@@ -396,10 +523,10 @@ def main(args):
                 valid_loss,valid_acc = test(args, model, device, xvalid, yvalid,  criterion, k)
                 print(' Valid: loss={:.3f}, acc={:5.1f}% |'.format(valid_loss, valid_acc),end='')
                 # Adapt lr
-                if valid_loss<best_loss:
-                    best_loss=valid_loss
-                # if valid_acc>best_acc:
-                #     best_acc=valid_acc
+                # if valid_loss<best_loss:
+                #     best_loss=valid_loss
+                if valid_acc>best_acc:
+                    best_acc=valid_acc
                     best_model=get_model(model)
                     patience=args.lr_patience
                     print(' *',end='')
@@ -444,10 +571,10 @@ def main(args):
                 valid_loss,valid_acc = test(args, model, device, xvalid, yvalid, criterion,k)
                 print(' Valid: loss={:.3f}, acc={:5.1f}% |'.format(valid_loss, valid_acc),end='')
                 # Adapt lr
-                if valid_loss<best_loss:
-                    best_loss=valid_loss
-                # if valid_acc>best_acc:
-                #     best_acc=valid_acc
+                # if valid_loss<best_loss:
+                #     best_loss=valid_loss
+                if valid_acc>best_acc:
+                    best_acc=valid_acc
                     best_model=get_model(model)
                     patience=args.lr_patience
                     print(' *',end='')
@@ -509,7 +636,7 @@ if __name__ == "__main__":
                         help='input batch size for training (default: 64)')
     parser.add_argument('--batch_size_test', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 64)')
-    parser.add_argument('--n_epochs', type=int, default=500, metavar='N',
+    parser.add_argument('--n_epochs', type=int, default=10, metavar='N',
                         help='number of training epochs/task (default: 200)')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
@@ -526,7 +653,10 @@ if __name__ == "__main__":
                         help='hold before decaying lr (default: 6)')
     parser.add_argument('--lr_factor', type=int, default=2, metavar='LRF',
                         help='lr decay factor (default: 2)')
-
+    parser.add_argument('--feat_dim', type=int, default=512)
+    parser.add_argument('--temperature', type=float, default=0.1)
+    parser.add_argument('--lamb', type=float, default=0)
+    parser.add_argument('--split_loss', type=int, default=0)
 
     args = parser.parse_args()
     print('='*100)
