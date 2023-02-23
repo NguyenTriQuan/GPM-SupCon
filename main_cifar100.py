@@ -396,10 +396,10 @@ def main(args):
                 valid_loss,valid_acc = test(args, model, device, xvalid, yvalid,  criterion, k)
                 print(' Valid: loss={:.3f}, acc={:5.1f}% |'.format(valid_loss, valid_acc),end='')
                 # Adapt lr
-                if valid_loss<best_loss:
-                    best_loss=valid_loss
-                # if valid_acc>best_acc:
-                #     best_acc=valid_acc
+                # if valid_loss<best_loss:
+                #     best_loss=valid_loss
+                if valid_acc>best_acc:
+                    best_acc=valid_acc
                     best_model=get_model(model)
                     patience=args.lr_patience
                     print(' *',end='')
@@ -444,10 +444,10 @@ def main(args):
                 valid_loss,valid_acc = test(args, model, device, xvalid, yvalid, criterion,k)
                 print(' Valid: loss={:.3f}, acc={:5.1f}% |'.format(valid_loss, valid_acc),end='')
                 # Adapt lr
-                if valid_loss<best_loss:
-                    best_loss=valid_loss
-                # if valid_acc>best_acc:
-                #     best_acc=valid_acc
+                # if valid_loss<best_loss:
+                #     best_loss=valid_loss
+                if valid_acc>best_acc:
+                    best_acc=valid_acc
                     best_model=get_model(model)
                     patience=args.lr_patience
                     print(' *',end='')
