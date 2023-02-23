@@ -20,6 +20,7 @@ import pdb
 import argparse,time
 import math
 from copy import deepcopy
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 negative_slope = math.sqrt(5)
 
@@ -156,6 +157,32 @@ def adjust_learning_rate(optimizer, epoch, args):
         else:
             param_group['lr'] /= args.lr_factor  
 
+def sup_con_loss(self, features, labels):
+        sim = torch.div(
+            torch.matmul(features, features.T),
+            self.temperature)
+        logits_max, _ = torch.max(sim, dim=1, keepdim=True)
+        logits = sim - logits_max.detach()
+        pos_mask = (labels.view(-1, 1) == labels.view(1, -1)).float().to(device)
+
+        logits_mask = torch.scatter(
+            torch.ones_like(pos_mask),
+            1,
+            torch.arange(features.shape[0]).view(-1, 1).to(device),
+            0
+        )
+        pos_mask = pos_mask * logits_mask
+
+        exp_logits = torch.exp(logits) * logits_mask
+        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
+
+        mean_log_prob_pos = (pos_mask * log_prob).sum(1) / pos_mask.sum(1)        
+        # loss
+        loss = - mean_log_prob_pos
+        loss = loss.mean()
+
+        return loss
+        
 def train(args, model, device, x,y, optimizer,criterion, task_id):
     model.train()
     r=np.arange(x.size(0))
