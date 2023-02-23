@@ -222,7 +222,7 @@ def test(args, model, device, x, y, criterion, task_id):
     total_num = 0 
     correct = 0
     r=np.arange(x.size(0))
-    np.random.shuffle(r)
+    # np.random.shuffle(r)
     r=torch.LongTensor(r).to(device)
     with torch.no_grad():
         # Loop batches

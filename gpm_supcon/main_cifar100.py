@@ -184,24 +184,28 @@ def sup_con_loss(features, labels):
 
         return loss
 
-def get_classes_statistic(model, x, y, task_id):
-        self.model.eval()
+def get_classes_statistic(args, model, x, y, task_id):
+        model.eval()
         features = []
         labels = []
-        for images, targets in data_loader:
-            images = images.to(device)
-            if valid_transform:
-                images = valid_transform(images)
+        r=np.arange(x.size(0))
+        # np.random.shuffle(r)
+        r=torch.LongTensor(r).to(device)
+        for i in range(0,len(r),args.batch_size_train):
+            if i+args.batch_size_train<=len(r): b=r[i:i+args.batch_size_train]
+            else: b=r[i:]
+            data = x[b]
+            data, target = data.to(device), y[b].to(device)
             
-            outputs = self.model.forward(images)
+            outputs = model(data)
             features.append(outputs.detach())
-            labels.append(targets)
+            labels.append(target)
 
         features = torch.cat(features, dim=0)
         labels = torch.cat(labels, dim=0)
         features_mean = []
         features_var = []
-        begin = self.ncla[-2]
+        begin = t
         end = self.ncla[-1]
         for cla in range(begin, end):
             ids = (labels == cla)
@@ -273,7 +277,7 @@ def test(args, model, device, x, y, criterion, task_id):
     total_num = 0 
     correct = 0
     r=np.arange(x.size(0))
-    np.random.shuffle(r)
+    # np.random.shuffle(r)
     r=torch.LongTensor(r).to(device)
     with torch.no_grad():
         # Loop batches
