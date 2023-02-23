@@ -24,7 +24,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 temperature = 0.1
 negative_slope = math.sqrt(5)
 feat_dim = 512
-wn = True
+wn = False
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
@@ -91,7 +91,8 @@ class AlexNet(nn.Module):
         for n, m in self.named_modules():
             if 'fc' in n or 'conv' in n:
                 print(f'layer {n}, next kernel size {m.next_ks}')
-        self.initialize()
+        if wn:
+            self.initialize()
         self.features_mean = None
     
     def initialize(self):
@@ -206,9 +207,7 @@ def get_classes_statistic(args, model, x, y, t):
         features = torch.cat(features, dim=0)
         labels = torch.cat(labels, dim=0)
         features_mean = []
-        begin = t*10
-        end = (t+1)*10
-        for cla in range(begin, end):
+        for cla in range(0, 10):
             ids = (labels == cla)
             cla_features = features[ids]
             features_mean.append(cla_features.mean(0))
@@ -217,7 +216,7 @@ def get_classes_statistic(args, model, x, y, t):
         if model.features_mean is None:
             model.features_mean = features_mean # [num classes, feature dim]
         else:
-            model.features_mean = torch.cat([model.features_mean[:begin], features_mean], dim=0)
+            model.features_mean = torch.cat([model.features_mean[:t*10], features_mean], dim=0)
         
 def train(args, model, device, x,y, optimizer,criterion, task_id):
     model.train()
@@ -230,6 +229,7 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         else: b=r[i:]
         data = x[b]
         data, target = data.to(device), y[b].to(device)
+        target = target + task_id*10
         data = torch.cat([data, data], dim=0)
         target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
@@ -253,6 +253,7 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         else: b=r[i:]
         data = x[b]
         data, target = data.to(device), y[b].to(device)
+        target = target + task_id*10
         data = torch.cat([data, data], dim=0)
         target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
@@ -263,14 +264,14 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         # Gradient Projections 
         kk = 0 
         for k, (m,params) in enumerate(model.named_parameters()):
-            if k<15 and len(params.size())!=1:
-            # if 'last' not in m and len(params.size())!=1:
+            # if k<15 and len(params.size())!=1:
+            if 'last' not in m and len(params.size())!=1:
                 sz =  params.grad.data.size(0)
                 params.grad.data = params.grad.data - torch.mm(params.grad.data.view(sz,-1),\
                                                         feature_mat[kk]).view(params.size())
                 kk +=1
-            elif (k<15 and len(params.size())==1) and task_id !=0 :
-            # elif 'last' not in m and task_id !=0 :
+            # elif (k<15 and len(params.size())==1) and task_id !=0 :
+            elif 'last' not in m and task_id !=0 :
                 params.grad.data.fill_(0)
 
         optimizer.step()
@@ -298,16 +299,14 @@ def test(args, model, device, x, y, criterion, task_id):
             features_mean = model.features_mean[task_id*10: (task_id+1)*10]
             features_mean = F.normalize(features_mean, dim=1)
             pred = torch.matmul(output, features_mean.T)
-
             pred = pred.argmax(dim=1, keepdim=True) 
-            
             correct    += pred.eq(target.view_as(pred)).sum().item()
             total_num  += len(b)
 
     acc = 100. * correct / total_num
     return 0, acc
 
-def get_representation_matrix (net, device, x, y=None): 
+def get_representation_matrix(net, device, x, y=None): 
     # Collect activations by forward pass
     r=np.arange(x.size(0))
     np.random.shuffle(r)
@@ -572,7 +571,7 @@ if __name__ == "__main__":
                         help='input batch size for training (default: 64)')
     parser.add_argument('--batch_size_test', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 64)')
-    parser.add_argument('--n_epochs', type=int, default=500, metavar='N',
+    parser.add_argument('--n_epochs', type=int, default=200, metavar='N',
                         help='number of training epochs/task (default: 200)')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
