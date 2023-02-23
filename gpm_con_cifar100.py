@@ -318,7 +318,7 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
             if args.split_loss == 0:
                 loss = sup_con_loss_cil(output, target, model.features_mean[:task_id*10], args.temperature, args.lamb)
             else:
-                loss = sup_con_loss(output, target) + args.lamb * old_con_loss(output, model.features_mean[:task_id*10], args.temperature)
+                loss = sup_con_loss(output, target, args.temperature) + args.lamb * old_con_loss(output, model.features_mean[:task_id*10], args.temperature)
         else:
             loss = sup_con_loss(output, target, args.temperature)  
         loss.backward()
