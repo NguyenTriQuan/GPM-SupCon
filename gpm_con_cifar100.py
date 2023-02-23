@@ -21,9 +21,10 @@ import argparse,time
 import math
 from copy import deepcopy
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-temperature = 0.1
+temperature = 0.2
 negative_slope = math.sqrt(5)
 feat_dim = 512
+lamb = 100
 wn = False
 cil = True
 
@@ -69,8 +70,11 @@ class AlexNet(nn.Module):
         self.maxpool=torch.nn.MaxPool2d(2)
         self.relu=torch.nn.ReLU()
         # self.relu=torch.nn.LeakyReLU(negative_slope=negative_slope)
-        self.drop1=torch.nn.Dropout(0.2)
-        self.drop2=torch.nn.Dropout(0.5)
+        # self.drop1=torch.nn.Dropout(0.2)
+        # self.drop2=torch.nn.Dropout(0.5)
+
+        self.drop1=torch.nn.Dropout(0.0)
+        self.drop2=torch.nn.Dropout(0.0)
 
         self.conv3.next_ks = self.smid
         self.fc1 = nn.Linear(256*self.smid*self.smid,2048, bias=False)
@@ -167,30 +171,80 @@ def adjust_learning_rate(optimizer, epoch, args):
             param_group['lr'] /= args.lr_factor  
 
 def sup_con_loss(features, labels):
-        sim = torch.div(
-            torch.matmul(features, features.T),
-            temperature)
-        logits_max, _ = torch.max(sim, dim=1, keepdim=True)
-        logits = sim - logits_max.detach()
-        pos_mask = (labels.view(-1, 1) == labels.view(1, -1)).float().to(device)
+    features = F.normalize(features, dim=1)
+    sim = torch.div(
+        torch.matmul(features, features.T),
+        temperature)
+    logits_max, _ = torch.max(sim, dim=1, keepdim=True)
+    logits = sim - logits_max.detach()
+    pos_mask = (labels.view(-1, 1) == labels.view(1, -1)).float().to(device)
 
-        logits_mask = torch.scatter(
-            torch.ones_like(pos_mask),
-            1,
-            torch.arange(features.shape[0]).view(-1, 1).to(device),
-            0
-        )
-        pos_mask = pos_mask * logits_mask
+    logits_mask = torch.scatter(
+        torch.ones_like(pos_mask),
+        1,
+        torch.arange(features.shape[0]).view(-1, 1).to(device),
+        0
+    )
+    pos_mask = pos_mask * logits_mask
 
-        exp_logits = torch.exp(logits) * logits_mask
-        log_prob = logits - torch.log(exp_logits.sum(1, keepdim=True))
+    exp_logits = torch.exp(logits) * logits_mask
+    log_prob = logits - torch.log(exp_logits.mean(1, keepdim=True))
 
-        mean_log_prob_pos = (pos_mask * log_prob).sum(1) / pos_mask.sum(1)        
-        # loss
-        loss = - mean_log_prob_pos
-        loss = loss.mean()
+    mean_log_prob_pos = (pos_mask * log_prob).sum(1) / pos_mask.sum(1)        
+    # loss
+    loss = - mean_log_prob_pos
+    loss = loss.mean()
 
-        return loss
+    return loss
+
+def sup_con_loss_cil(features, labels, features_mean):
+    features = F.normalize(features, dim=1)
+    features_mean = F.normalize(features_mean, dim=1)
+    sim = torch.div(
+        torch.matmul(features, features.T),
+        temperature)
+
+    sim_old = torch.div(
+        torch.matmul(features, features_mean.T),
+        temperature)
+    logits_max, _ = torch.max(sim, dim=1, keepdim=True)
+    logits = sim - logits_max.detach()
+    pos_mask = (labels.view(-1, 1) == labels.view(1, -1)).float().to(device)
+
+    logits_max_old, _ = torch.max(sim_old, dim=1, keepdim=True)
+    logits_old = sim_old - logits_max_old.detach()
+
+    logits_mask = torch.scatter(
+        torch.ones_like(pos_mask),
+        1,
+        torch.arange(features.shape[0]).view(-1, 1).to(device),
+        0
+    )
+    pos_mask = pos_mask * logits_mask
+
+    exp_logits = torch.exp(logits) * logits_mask
+    exp_logits_old = torch.exp(logits_old)
+    log_prob = logits - torch.log(exp_logits.mean(1, keepdim=True) + lamb * exp_logits_old.mean(1, keepdim=True))
+
+    mean_log_prob_pos = (pos_mask * log_prob).sum(1) / pos_mask.sum(1)        
+    # loss
+    loss = - mean_log_prob_pos
+    loss = loss.mean()
+
+    return loss
+
+def old_con_loss(features, features_mean):
+    features = F.normalize(features, dim=1)
+    features_mean = F.normalize(features_mean, dim=1)
+    sim = torch.div(
+        torch.matmul(features, features_mean.T),
+        temperature)
+
+    logits_max, _ = torch.max(sim, dim=1, keepdim=True)
+    logits = sim - logits_max.detach()
+    exp_logits = torch.exp(logits)
+    loss = torch.log(exp_logits.mean(1))
+    return loss.mean()
 
 def get_classes_statistic(args, model, x, y, t):
         model.eval()
@@ -223,7 +277,7 @@ def get_classes_statistic(args, model, x, y, t):
         else:
             model.features_mean = torch.cat([model.features_mean[:t*10], features_mean], dim=0)
         
-def train(args, model, device, x,y, optimizer,criterion, task_id):
+def train(args, model, device, x, y, optimizer, criterion, task_id):
     model.train()
     r=np.arange(x.size(0))
     np.random.shuffle(r)
@@ -238,8 +292,11 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
         output = model(data)
-        output = F.normalize(output, dim=1)
-        loss = sup_con_loss(output, target)        
+        if cil and task_id > 0:
+            # loss = sup_con_loss_cil(output, target, model.features_mean[:task_id*10])
+            loss = sup_con_loss(output, target) + lamb * old_con_loss(output, model.features_mean[:task_id*10])
+        else:
+            loss = sup_con_loss(output, target)        
         loss.backward()
         optimizer.step()
         if wn:
@@ -261,7 +318,6 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
         output = model(data)
-        output = F.normalize(output, dim=1)
         loss = sup_con_loss(output, target)       
         loss.backward()
         # Gradient Projections 
@@ -578,7 +634,7 @@ if __name__ == "__main__":
                         help='input batch size for training (default: 64)')
     parser.add_argument('--batch_size_test', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 64)')
-    parser.add_argument('--n_epochs', type=int, default=1, metavar='N',
+    parser.add_argument('--n_epochs', type=int, default=10, metavar='N',
                         help='number of training epochs/task (default: 200)')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
