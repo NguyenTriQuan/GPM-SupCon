@@ -199,8 +199,8 @@ def get_classes_statistic(args, model, x, y, t):
         r=np.arange(x.size(0))
         # np.random.shuffle(r)
         r=torch.LongTensor(r).to(device)
-        for i in range(0,len(r),args.batch_size_train):
-            if i+args.batch_size_train<=len(r): b=r[i:i+args.batch_size_train]
+        for i in range(0,len(r),args.batch_size_test):
+            if i+args.batch_size_test<=len(r): b=r[i:i+args.batch_size_test]
             else: b=r[i:]
             data = x[b]
             data, target = data.to(device), y[b].to(device)
@@ -318,12 +318,12 @@ def get_representation_matrix(net, device, x, y=None):
     r=np.arange(x.size(0))
     np.random.shuffle(r)
     r=torch.LongTensor(r).to(device)
-    b=r[0:125] # Take 125 random samples 
+    b=r[0:2048] # Take 125 random samples 
     example_data = x[b]
     example_data = example_data.to(device)
     example_out  = net(example_data)
     
-    batch_list=[2*12,100,100,125,125,125] 
+    batch_list=[2*12,100,100,2048,2048,2048] 
     mat_list=[]
     act_key=list(net.act.keys())
     for i in range(len(net.map)):
