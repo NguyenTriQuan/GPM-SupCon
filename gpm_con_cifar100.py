@@ -23,9 +23,9 @@ from copy import deepcopy
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 temperature = 0.1
 negative_slope = math.sqrt(5)
-feat_dim = 128
+feat_dim = 512
 wn = False
-cil = False
+cil = True
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
@@ -578,7 +578,7 @@ if __name__ == "__main__":
                         help='input batch size for training (default: 64)')
     parser.add_argument('--batch_size_test', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 64)')
-    parser.add_argument('--n_epochs', type=int, default=200, metavar='N',
+    parser.add_argument('--n_epochs', type=int, default=1, metavar='N',
                         help='number of training epochs/task (default: 200)')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
