@@ -21,6 +21,26 @@ import argparse,time
 import math
 from copy import deepcopy
 
+def initialize(m: nn.Module) -> None:
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
+        fan_in = m.weight.data.size(1)
+        fan_out = m.weight.data.size(0)
+        std = 1.0 * math.sqrt(2.0 / (fan_in + fan_out))
+        a = math.sqrt(3.0) * std
+        m.weight.data.uniform_(-a, a)
+        if m.bias is not None:
+            m.bias.data.fill_(0.0)
+
+def normalize(m: nn.Module) -> None:
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
+        fan_in = m.weight.data.size(1)
+        fan_out = m.weight.data.size(0)
+        std = 1.0 * math.sqrt(2.0 / (fan_in + fan_out))
+        a = math.sqrt(3.0) * std
+        m.weight.data.uniform_(-a, a)
+        if m.bias is not None:
+            m.bias.data.fill_(0.0)
+
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
     return int(np.floor((Lin+2*padding-dilation*(kernel_size-1)-1)/float(stride)+1))
