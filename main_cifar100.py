@@ -22,24 +22,27 @@ import math
 from copy import deepcopy
 
 def initialize(m: nn.Module) -> None:
-    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
-        fan_in = m.weight.data.size(1)
-        fan_out = m.weight.data.size(0)
-        std = 1.0 * math.sqrt(2.0 / (fan_in + fan_out))
-        a = math.sqrt(3.0) * std
-        m.weight.data.uniform_(-a, a)
-        if m.bias is not None:
-            m.bias.data.fill_(0.0)
+    fan = m.weight.shape[0] * m.next_ks
+    # m.gain = torch.nn.init.calculate_gain('relu')
+    m.gain = torch.nn.init.calculate_gain('leaky_relu', math.sqrt(5))
+    m.bound = m.gain / math.sqrt(fan)
+    nn.init.normal_(m.weight, 0, m.bound)
+    if m.bias is not None:
+        nn.init.constant_(m.bias, 0)
 
 def normalize(m: nn.Module) -> None:
-    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
-        fan_in = m.weight.data.size(1)
-        fan_out = m.weight.data.size(0)
-        std = 1.0 * math.sqrt(2.0 / (fan_in + fan_out))
-        a = math.sqrt(3.0) * std
-        m.weight.data.uniform_(-a, a)
-        if m.bias is not None:
-            m.bias.data.fill_(0.0)
+    if len(m.weight.shape) == 4:
+        norm_dim = (1, 2, 3)
+        norm_view = (-1, 1, 1, 1)
+    else:
+        norm_dim = (1)
+        norm_view = (-1, 1)
+
+    with torch.no_grad():
+        # mean = self.weight.mean(dim=self.norm_dim).detach().view(self.norm_view)
+        var = m.weight.var(dim=norm_dim, unbiased=False).detach().sum() * m.next_ks
+        std = var ** 0.5
+        m.weight.data = m.gain * (m.weight.data) / std 
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
@@ -54,6 +57,7 @@ class AlexNet(nn.Module):
         self.in_channel =[]
         self.map.append(32)
         self.conv1 = nn.Conv2d(3, 64, 4, bias=False)
+        self.conv1.next_ks = 3
         self.bn1 = nn.BatchNorm2d(64, track_running_stats=False)
         s=compute_conv_output_size(32,4)
         s=s//2
@@ -61,6 +65,7 @@ class AlexNet(nn.Module):
         self.in_channel.append(3)
         self.map.append(s)
         self.conv2 = nn.Conv2d(64, 128, 3, bias=False)
+        self.conv2.next_ks = 2
         self.bn2 = nn.BatchNorm2d(128, track_running_stats=False)
         s=compute_conv_output_size(s,3)
         s=s//2
@@ -80,16 +85,49 @@ class AlexNet(nn.Module):
         self.drop1=torch.nn.Dropout(0.2)
         self.drop2=torch.nn.Dropout(0.5)
 
+        self.conv3.next_ks = self.smid
         self.fc1 = nn.Linear(256*self.smid*self.smid,2048, bias=False)
+        self.fc1.next_ks = 1
         self.bn4 = nn.BatchNorm1d(2048, track_running_stats=False)
         self.fc2 = nn.Linear(2048,2048, bias=False)
+        self.fc2.next_ks = 1
         self.bn5 = nn.BatchNorm1d(2048, track_running_stats=False)
         self.map.extend([2048])
         
         self.taskcla = taskcla
-        self.fc3=torch.nn.ModuleList()
+        self.last=torch.nn.ModuleList()
         for t,n in self.taskcla:
-            self.fc3.append(torch.nn.Linear(2048,n,bias=False))
+            self.last.append(torch.nn.Linear(2048,n,bias=False))
+
+        self.gpm_layers = [m for n, m in self.named_modules() if 'fc' in n or 'conv' in n]
+        for n, m in self.named_modules():
+            if 'fc' in n or 'conv' in n:
+                print(f'layer {n}, next kernel size {m.next_ks}')
+        self.initialize()
+    
+    def initialize(self):
+        for m in self.gpm_layers:
+            fan = m.weight.shape[0] * m.next_ks
+            m.gain = torch.nn.init.calculate_gain('relu')
+            m.bound = m.gain / math.sqrt(fan)
+            nn.init.normal_(m.weight, 0, m.bound)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        
+    def normalize(self):
+        with torch.no_grad():
+            for m in self.gpm_layers:
+                if len(m.weight.shape) == 4:
+                    norm_dim = (1, 2, 3)
+                    norm_view = (-1, 1, 1, 1)
+                else:
+                    norm_dim = (1)
+                    norm_view = (-1, 1)
+
+                mean = m.weight.mean(dim=norm_dim).detach().view(norm_view)
+                var = m.weight.var(dim=norm_dim, unbiased=False).detach().sum() * m.next_ks
+                std = var ** 0.5
+                m.weight.data = m.gain * (m.weight.data-mean) / std 
         
     def forward(self, x):
         bsz = deepcopy(x.size(0))
@@ -115,7 +153,7 @@ class AlexNet(nn.Module):
         x = self.drop2(self.relu(self.bn5(x)))
         y=[]
         for t,i in self.taskcla:
-            y.append(self.fc3[t](x))
+            y.append(self.last[t](x))
             
         return y
 
@@ -149,6 +187,7 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         loss = criterion(output[task_id], target)        
         loss.backward()
         optimizer.step()
+        model.normalize()
 
 def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_id):
     model.train()
