@@ -240,6 +240,7 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         optimizer.step()
         if wn:
             model.normalize()
+    get_classes_statistic(args, model, x, y, task_id)
 
 def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_id):
     model.train()
@@ -275,6 +276,7 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         optimizer.step()
         if wn:
             model.normalize()
+    get_classes_statistic(args, model, x, y, task_id)
 
 def test(args, model, device, x, y, criterion, task_id):
     model.eval()
@@ -292,21 +294,18 @@ def test(args, model, device, x, y, criterion, task_id):
             data = x[b]
             data, target = data.to(device), y[b].to(device)
             output = model(data)
-            features_mean = model.features_mean[task_id*10: (task_id+1)*10]
             output = F.normalize(output, dim=1)
+            features_mean = model.features_mean[task_id*10: (task_id+1)*10]
             features_mean = F.normalize(features_mean, dim=1)
-            predicts = torch.matmul(output, features_mean.T)
+            pred = torch.matmul(output, features_mean.T)
 
-            loss = criterion(output[task_id], target)
-            pred = output[task_id].argmax(dim=1, keepdim=True) 
+            pred = pred.argmax(dim=1, keepdim=True) 
             
             correct    += pred.eq(target.view_as(pred)).sum().item()
-            total_loss += loss.data.cpu().numpy().item()*len(b)
             total_num  += len(b)
 
     acc = 100. * correct / total_num
-    final_loss = total_loss / total_num
-    return final_loss, acc
+    return 0, acc
 
 def get_representation_matrix (net, device, x, y=None): 
     # Collect activations by forward pass
@@ -460,10 +459,10 @@ def main(args):
                 valid_loss,valid_acc = test(args, model, device, xvalid, yvalid,  criterion, k)
                 print(' Valid: loss={:.3f}, acc={:5.1f}% |'.format(valid_loss, valid_acc),end='')
                 # Adapt lr
-                if valid_loss<best_loss:
-                    best_loss=valid_loss
-                # if valid_acc>best_acc:
-                #     best_acc=valid_acc
+                # if valid_loss<best_loss:
+                #     best_loss=valid_loss
+                if valid_acc>best_acc:
+                    best_acc=valid_acc
                     best_model=get_model(model)
                     patience=args.lr_patience
                     print(' *',end='')
@@ -508,10 +507,10 @@ def main(args):
                 valid_loss,valid_acc = test(args, model, device, xvalid, yvalid, criterion,k)
                 print(' Valid: loss={:.3f}, acc={:5.1f}% |'.format(valid_loss, valid_acc),end='')
                 # Adapt lr
-                if valid_loss<best_loss:
-                    best_loss=valid_loss
-                # if valid_acc>best_acc:
-                #     best_acc=valid_acc
+                # if valid_loss<best_loss:
+                #     best_loss=valid_loss
+                if valid_acc>best_acc:
+                    best_acc=valid_acc
                     best_model=get_model(model)
                     patience=args.lr_patience
                     print(' *',end='')
