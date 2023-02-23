@@ -22,13 +22,14 @@ import math
 from copy import deepcopy
 
 negative_slope = math.sqrt(5)
+wn = True
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
     return int(np.floor((Lin+2*padding-dilation*(kernel_size-1)-1)/float(stride)+1))
 
 class AlexNet(nn.Module):
-    def __init__(self,taskcla):
+    def __init__(self,taskcla,bn_affine=False):
         super(AlexNet, self).__init__()
         self.act=OrderedDict()
         self.map =[]
@@ -37,7 +38,7 @@ class AlexNet(nn.Module):
         self.map.append(32)
         self.conv1 = nn.Conv2d(3, 64, 4, bias=False)
         self.conv1.next_ks = 3
-        self.bn1 = nn.BatchNorm2d(64, track_running_stats=False)
+        self.bn1 = nn.BatchNorm2d(64, track_running_stats=False, affine=bn_affine)
         # self.bn1 = nn.Identity()
         s=compute_conv_output_size(32,4)
         s=s//2
@@ -46,7 +47,7 @@ class AlexNet(nn.Module):
         self.map.append(s)
         self.conv2 = nn.Conv2d(64, 128, 3, bias=False)
         self.conv2.next_ks = 2
-        self.bn2 = nn.BatchNorm2d(128, track_running_stats=False)
+        self.bn2 = nn.BatchNorm2d(128, track_running_stats=False, affine=bn_affine)
         # self.bn2 = nn.Identity()
         s=compute_conv_output_size(s,3)
         s=s//2
@@ -54,7 +55,7 @@ class AlexNet(nn.Module):
         self.in_channel.append(64)
         self.map.append(s)
         self.conv3 = nn.Conv2d(128, 256, 2, bias=False)
-        self.bn3 = nn.BatchNorm2d(256, track_running_stats=False)
+        self.bn3 = nn.BatchNorm2d(256, track_running_stats=False, affine=bn_affine)
         # self.bn3 = nn.Identity()
         s=compute_conv_output_size(s,2)
         s=s//2
@@ -71,11 +72,11 @@ class AlexNet(nn.Module):
         self.conv3.next_ks = self.smid
         self.fc1 = nn.Linear(256*self.smid*self.smid,2048, bias=False)
         self.fc1.next_ks = 1
-        self.bn4 = nn.BatchNorm1d(2048, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(2048, track_running_stats=False, affine=bn_affine)
         # self.bn4 = nn.Identity()
         self.fc2 = nn.Linear(2048,2048, bias=False)
         self.fc2.next_ks = 1
-        self.bn5 = nn.BatchNorm1d(2048, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(2048, track_running_stats=False, affine=bn_affine)
         # self.bn5 = nn.Identity()
         self.map.extend([2048])
         
@@ -88,7 +89,9 @@ class AlexNet(nn.Module):
         for n, m in self.named_modules():
             if 'fc' in n or 'conv' in n:
                 print(f'layer {n}, next kernel size {m.next_ks}')
-        # self.initialize()
+        
+        if wn:
+            self.initialize()
     
     def initialize(self):
         for m in self.gpm_layers:
@@ -172,7 +175,8 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         loss = criterion(output[task_id], target)        
         loss.backward()
         optimizer.step()
-        # model.normalize()
+        if wn:
+            model.normalize()
 
 def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_id):
     model.train()
@@ -192,18 +196,19 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         # Gradient Projections 
         kk = 0 
         for k, (m,params) in enumerate(model.named_parameters()):
-            if k<15 and len(params.size())!=1:
-            # if 'last' not in m and len(params.size())!=1:
+            # if k<15 and len(params.size())!=1:
+            if 'last' not in m and len(params.size())!=1:
                 sz =  params.grad.data.size(0)
                 params.grad.data = params.grad.data - torch.mm(params.grad.data.view(sz,-1),\
                                                         feature_mat[kk]).view(params.size())
                 kk +=1
-            elif (k<15 and len(params.size())==1) and task_id !=0 :
-            # elif 'last' not in m and task_id !=0 :
+            # elif (k<15 and len(params.size())==1) and task_id !=0 :
+            elif 'last' not in m and task_id !=0 :
                 params.grad.data.fill_(0)
 
         optimizer.step()
-        # model.normalize()
+        if wn:
+            model.normalize()
 
 def test(args, model, device, x, y, criterion, task_id):
     model.eval()

@@ -21,15 +21,16 @@ import argparse,time
 import math
 from copy import deepcopy
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+temperature = 0.1
 negative_slope = math.sqrt(5)
+feat_dim = 512
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
     return int(np.floor((Lin+2*padding-dilation*(kernel_size-1)-1)/float(stride)+1))
 
 class AlexNet(nn.Module):
-    def __init__(self,taskcla):
+    def __init__(self,taskcla,bn_affine=False):
         super(AlexNet, self).__init__()
         self.act=OrderedDict()
         self.map =[]
@@ -38,7 +39,7 @@ class AlexNet(nn.Module):
         self.map.append(32)
         self.conv1 = nn.Conv2d(3, 64, 4, bias=False)
         self.conv1.next_ks = 3
-        self.bn1 = nn.BatchNorm2d(64, track_running_stats=False)
+        self.bn1 = nn.BatchNorm2d(64, track_running_stats=False, affine=bn_affine)
         # self.bn1 = nn.Identity()
         s=compute_conv_output_size(32,4)
         s=s//2
@@ -47,7 +48,7 @@ class AlexNet(nn.Module):
         self.map.append(s)
         self.conv2 = nn.Conv2d(64, 128, 3, bias=False)
         self.conv2.next_ks = 2
-        self.bn2 = nn.BatchNorm2d(128, track_running_stats=False)
+        self.bn2 = nn.BatchNorm2d(128, track_running_stats=False, affine=bn_affine)
         # self.bn2 = nn.Identity()
         s=compute_conv_output_size(s,3)
         s=s//2
@@ -55,7 +56,7 @@ class AlexNet(nn.Module):
         self.in_channel.append(64)
         self.map.append(s)
         self.conv3 = nn.Conv2d(128, 256, 2, bias=False)
-        self.bn3 = nn.BatchNorm2d(256, track_running_stats=False)
+        self.bn3 = nn.BatchNorm2d(256, track_running_stats=False, affine=bn_affine)
         # self.bn3 = nn.Identity()
         s=compute_conv_output_size(s,2)
         s=s//2
@@ -72,18 +73,18 @@ class AlexNet(nn.Module):
         self.conv3.next_ks = self.smid
         self.fc1 = nn.Linear(256*self.smid*self.smid,2048, bias=False)
         self.fc1.next_ks = 1
-        self.bn4 = nn.BatchNorm1d(2048, track_running_stats=False)
+        self.bn4 = nn.BatchNorm1d(2048, track_running_stats=False, affine=bn_affine)
         # self.bn4 = nn.Identity()
         self.fc2 = nn.Linear(2048,2048, bias=False)
         self.fc2.next_ks = 1
-        self.bn5 = nn.BatchNorm1d(2048, track_running_stats=False)
+        self.bn5 = nn.BatchNorm1d(2048, track_running_stats=False, affine=bn_affine)
         # self.bn5 = nn.Identity()
         self.map.extend([2048])
         
         self.taskcla = taskcla
-        self.last=torch.nn.ModuleList()
-        for t,n in self.taskcla:
-            self.last.append(torch.nn.Linear(2048,n,bias=False))
+        # self.last=torch.nn.ModuleList()
+        # for t,n in self.taskcla:
+        #     self.last.append(torch.nn.Linear(2048,n,bias=False))
 
         self.gpm_layers = [m for n, m in self.named_modules() if 'fc' in n or 'conv' in n]
         for n, m in self.named_modules():
@@ -137,11 +138,11 @@ class AlexNet(nn.Module):
         self.act['fc2']=x        
         x = self.fc2(x)
         x = self.drop2(self.relu(self.bn5(x)))
-        y=[]
-        for t,i in self.taskcla:
-            y.append(self.last[t](x))
+        # y=[]
+        # for t,i in self.taskcla:
+        #     y.append(self.last[t](x))
             
-        return y
+        return x
 
 def get_model(model):
     return deepcopy(model.state_dict())
@@ -157,10 +158,10 @@ def adjust_learning_rate(optimizer, epoch, args):
         else:
             param_group['lr'] /= args.lr_factor  
 
-def sup_con_loss(self, features, labels):
+def sup_con_loss(features, labels):
         sim = torch.div(
             torch.matmul(features, features.T),
-            self.temperature)
+            temperature)
         logits_max, _ = torch.max(sim, dim=1, keepdim=True)
         logits = sim - logits_max.detach()
         pos_mask = (labels.view(-1, 1) == labels.view(1, -1)).float().to(device)
@@ -182,6 +183,40 @@ def sup_con_loss(self, features, labels):
         loss = loss.mean()
 
         return loss
+
+def get_classes_statistic(model, x, y, task_id):
+        self.model.eval()
+        features = []
+        labels = []
+        for images, targets in data_loader:
+            images = images.to(device)
+            if valid_transform:
+                images = valid_transform(images)
+            
+            outputs = self.model.forward(images)
+            features.append(outputs.detach())
+            labels.append(targets)
+
+        features = torch.cat(features, dim=0)
+        labels = torch.cat(labels, dim=0)
+        features_mean = []
+        features_var = []
+        begin = self.ncla[-2]
+        end = self.ncla[-1]
+        for cla in range(begin, end):
+            ids = (labels == cla)
+            cla_features = features[ids]
+            features_mean.append(cla_features.mean(0))
+            features_var.append(cla_features.var(0))
+
+        features_mean = torch.stack(features_mean, dim=0).to(device)
+        features_var = torch.stack(features_var, dim=0).to(device)
+        if self.model.features_mean is None:
+            self.model.features_mean = features_mean # [num classes, feature dim]
+            self.model.features_var = features_var
+        else:
+            self.model.features_mean = torch.cat([self.model.features_mean[:begin], features_mean], dim=0)
+            self.model.features_var = torch.cat([self.model.features_var[:begin], features_var], dim=0)
         
 def train(args, model, device, x,y, optimizer,criterion, task_id):
     model.train()
