@@ -21,10 +21,10 @@ import argparse,time
 import math
 from copy import deepcopy
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-temperature = 0.2
+# temperature = 0.2
 negative_slope = math.sqrt(5)
 feat_dim = 512
-lamb = 100
+# lamb = 100
 wn = False
 cil = True
 
@@ -170,7 +170,7 @@ def adjust_learning_rate(optimizer, epoch, args):
         else:
             param_group['lr'] /= args.lr_factor  
 
-def sup_con_loss(features, labels):
+def sup_con_loss(features, labels, temperature):
     features = F.normalize(features, dim=1)
     sim = torch.div(
         torch.matmul(features, features.T),
@@ -197,7 +197,7 @@ def sup_con_loss(features, labels):
 
     return loss
 
-def sup_con_loss_cil(features, labels, features_mean):
+def sup_con_loss_cil(features, labels, features_mean, temperature, lamb):
     features = F.normalize(features, dim=1)
     features_mean = F.normalize(features_mean, dim=1)
     sim = torch.div(
@@ -233,7 +233,7 @@ def sup_con_loss_cil(features, labels, features_mean):
 
     return loss
 
-def old_con_loss(features, features_mean):
+def old_con_loss(features, features_mean, temperature):
     features = F.normalize(features, dim=1)
     features_mean = F.normalize(features_mean, dim=1)
     sim = torch.div(
@@ -292,11 +292,7 @@ def train(args, model, device, x, y, optimizer, criterion, task_id):
         target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
         output = model(data)
-        if cil and task_id > 0:
-            loss = sup_con_loss_cil(output, target, model.features_mean[:task_id*10])
-            # loss = sup_con_loss(output, target) + lamb * old_con_loss(output, model.features_mean[:task_id*10])
-        else:
-            loss = sup_con_loss(output, target)        
+        loss = sup_con_loss(output, target, args.temperature)        
         loss.backward()
         optimizer.step()
         if wn:
@@ -318,7 +314,13 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
         output = model(data)
-        loss = sup_con_loss(output, target)       
+        if cil and task_id > 0:
+            if args.split_loss == 0:
+                loss = sup_con_loss_cil(output, target, model.features_mean[:task_id*10], args.temperature, args.lamb)
+            else:
+                loss = sup_con_loss(output, target) + args.lamb * old_con_loss(output, model.features_mean[:task_id*10], args.temperature)
+        else:
+            loss = sup_con_loss(output, target, args.temperature)  
         loss.backward()
         # Gradient Projections 
         kk = 0 
@@ -651,7 +653,10 @@ if __name__ == "__main__":
                         help='hold before decaying lr (default: 6)')
     parser.add_argument('--lr_factor', type=int, default=2, metavar='LRF',
                         help='lr decay factor (default: 2)')
-
+    parser.add_argument('--feat_dim', type=int, default=512)
+    parser.add_argument('--temperature', type=float, default=0.1)
+    parser.add_argument('--lamb', type=float, default=0)
+    parser.add_argument('--split_loss', type=int, default=0)
 
     args = parser.parse_args()
     print('='*100)
