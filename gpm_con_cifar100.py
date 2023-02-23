@@ -25,6 +25,7 @@ temperature = 0.1
 negative_slope = math.sqrt(5)
 feat_dim = 512
 wn = False
+cil = False
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
@@ -83,6 +84,9 @@ class AlexNet(nn.Module):
         self.map.extend([2048])
         
         self.taskcla = taskcla
+        self.fc3 = nn.Linear(2048, feat_dim, bias=False)
+        self.fc3.next_ks = 1
+        self.map.extend([2048])
         # self.last=torch.nn.ModuleList()
         # for t,n in self.taskcla:
         #     self.last.append(torch.nn.Linear(2048,n,bias=False))
@@ -144,7 +148,8 @@ class AlexNet(nn.Module):
         # y=[]
         # for t,i in self.taskcla:
         #     y.append(self.last[t](x))
-            
+        self.act['fc3']=x  
+        x = self.fc3(x) 
         return x
 
 def get_model(model):
@@ -292,11 +297,13 @@ def test(args, model, device, x, y, criterion, task_id):
             else: b=r[i:]
             data = x[b]
             data, target = data.to(device), y[b].to(device)
-            target += task_id*10
             output = model(data)
             output = F.normalize(output, dim=1)
-            # features_mean = model.features_mean[task_id*10: (task_id+1)*10]
-            features_mean = model.features_mean
+            if cil:
+                target += task_id*10
+                features_mean = model.features_mean
+            else:
+                features_mean = model.features_mean[task_id*10: (task_id+1)*10]
             features_mean = F.normalize(features_mean, dim=1)
             pred = torch.matmul(output, features_mean.T)
             pred = pred.argmax(dim=1, keepdim=True) 
@@ -316,7 +323,7 @@ def get_representation_matrix(net, device, x, y=None):
     example_data = example_data.to(device)
     example_out  = net(example_data)
     
-    batch_list=[2*12,100,100,125,125] 
+    batch_list=[2*12,100,100,125,125,125] 
     mat_list=[]
     act_key=list(net.act.keys())
     for i in range(len(net.map)):
@@ -415,7 +422,7 @@ def main(args):
     task_list = []
     for k,ncla in taskcla:
         # specify threshold hyperparameter
-        threshold = np.array([0.97] * 5) + task_id*np.array([0.003] * 5)
+        threshold = np.array([0.97] * 6) + task_id*np.array([0.003] * 6)
      
         print('*'*100)
         print('Task {:2d} ({:s})'.format(k,data[k]['name']))
@@ -571,7 +578,7 @@ if __name__ == "__main__":
                         help='input batch size for training (default: 64)')
     parser.add_argument('--batch_size_test', type=int, default=64, metavar='N',
                         help='input batch size for testing (default: 64)')
-    parser.add_argument('--n_epochs', type=int, default=200, metavar='N',
+    parser.add_argument('--n_epochs', type=int, default=2, metavar='N',
                         help='number of training epochs/task (default: 200)')
     parser.add_argument('--seed', type=int, default=1, metavar='S',
                         help='random seed (default: 1)')
