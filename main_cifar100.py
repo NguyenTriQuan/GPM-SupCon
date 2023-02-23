@@ -216,6 +216,7 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
                 params.grad.data.fill_(0)
 
         optimizer.step()
+        model.normalize()
 
 def test(args, model, device, x, y, criterion, task_id):
     model.eval()
@@ -368,6 +369,7 @@ def main(args):
 
         lr = args.lr 
         best_loss=np.inf
+        best_acc = 0
         print ('-'*40)
         print ('Task ID :{} | Learning Rate : {}'.format(task_id, lr))
         print ('-'*40)
@@ -395,8 +397,10 @@ def main(args):
                 valid_loss,valid_acc = test(args, model, device, xvalid, yvalid,  criterion, k)
                 print(' Valid: loss={:.3f}, acc={:5.1f}% |'.format(valid_loss, valid_acc),end='')
                 # Adapt lr
-                if valid_loss<best_loss:
-                    best_loss=valid_loss
+                # if valid_loss<best_loss:
+                #     best_loss=valid_loss
+                if valid_acc>best_acc:
+                    best_acc=valid_acc
                     best_model=get_model(model)
                     patience=args.lr_patience
                     print(' *',end='')
@@ -441,8 +445,10 @@ def main(args):
                 valid_loss,valid_acc = test(args, model, device, xvalid, yvalid, criterion,k)
                 print(' Valid: loss={:.3f}, acc={:5.1f}% |'.format(valid_loss, valid_acc),end='')
                 # Adapt lr
-                if valid_loss<best_loss:
-                    best_loss=valid_loss
+                # if valid_loss<best_loss:
+                #     best_loss=valid_loss
+                if valid_acc>best_acc:
+                    best_acc=valid_acc
                     best_model=get_model(model)
                     patience=args.lr_patience
                     print(' *',end='')
