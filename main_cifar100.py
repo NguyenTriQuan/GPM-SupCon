@@ -187,7 +187,7 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         loss = criterion(output[task_id], target)        
         loss.backward()
         optimizer.step()
-        # model.normalize()
+        model.normalize()
 
 def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_id):
     model.train()
@@ -216,7 +216,7 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
                 params.grad.data.fill_(0)
 
         optimizer.step()
-        # model.normalize()
+        model.normalize()
 
 def test(args, model, device, x, y, criterion, task_id):
     model.eval()
