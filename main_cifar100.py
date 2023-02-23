@@ -112,10 +112,10 @@ class AlexNet(nn.Module):
                     norm_dim = (1)
                     norm_view = (-1, 1)
 
-                mean = m.weight.mean(dim=norm_dim).detach().view(norm_view)
+                # mean = m.weight.mean(dim=norm_dim).detach().view(norm_view)
                 var = m.weight.var(dim=norm_dim, unbiased=False).detach().sum() * m.next_ks
                 std = var ** 0.5
-                m.weight.data = m.gain * (m.weight.data - mean) / std 
+                m.weight.data = m.gain * (m.weight.data) / std 
         
     def forward(self, x):
         bsz = deepcopy(x.size(0))
