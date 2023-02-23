@@ -229,7 +229,6 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         else: b=r[i:]
         data = x[b]
         data, target = data.to(device), y[b].to(device)
-        target = target + task_id*10
         data = torch.cat([data, data], dim=0)
         target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
@@ -253,7 +252,6 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         else: b=r[i:]
         data = x[b]
         data, target = data.to(device), y[b].to(device)
-        target = target + task_id*10
         data = torch.cat([data, data], dim=0)
         target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
@@ -294,9 +292,11 @@ def test(args, model, device, x, y, criterion, task_id):
             else: b=r[i:]
             data = x[b]
             data, target = data.to(device), y[b].to(device)
+            target += task_id*10
             output = model(data)
             output = F.normalize(output, dim=1)
-            features_mean = model.features_mean[task_id*10: (task_id+1)*10]
+            # features_mean = model.features_mean[task_id*10: (task_id+1)*10]
+            features_mean = model.features_mean
             features_mean = F.normalize(features_mean, dim=1)
             pred = torch.matmul(output, features_mean.T)
             pred = pred.argmax(dim=1, keepdim=True) 
