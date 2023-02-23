@@ -293,8 +293,8 @@ def train(args, model, device, x, y, optimizer, criterion, task_id):
         optimizer.zero_grad()        
         output = model(data)
         if cil and task_id > 0:
-            # loss = sup_con_loss_cil(output, target, model.features_mean[:task_id*10])
-            loss = sup_con_loss(output, target) + lamb * old_con_loss(output, model.features_mean[:task_id*10])
+            loss = sup_con_loss_cil(output, target, model.features_mean[:task_id*10])
+            # loss = sup_con_loss(output, target) + lamb * old_con_loss(output, model.features_mean[:task_id*10])
         else:
             loss = sup_con_loss(output, target)        
         loss.backward()
