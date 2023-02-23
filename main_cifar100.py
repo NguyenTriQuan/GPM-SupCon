@@ -22,7 +22,7 @@ import math
 from copy import deepcopy
 
 negative_slope = math.sqrt(5)
-wn = False
+wn = True
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
@@ -353,7 +353,7 @@ def main(args):
     task_list = []
     for k,ncla in taskcla:
         # specify threshold hyperparameter
-        threshold = np.array([0.982] * 5) + task_id*np.array([0.002] * 5)
+        threshold = np.array([0.98] * 5) + task_id*np.array([0.002] * 5)
      
         print('*'*100)
         print('Task {:2d} ({:s})'.format(k,data[k]['name']))
