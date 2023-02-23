@@ -353,7 +353,7 @@ def main(args):
     task_list = []
     for k,ncla in taskcla:
         # specify threshold hyperparameter
-        threshold = np.array([0.97] * 5) + task_id*np.array([0.003] * 5)
+        threshold = np.array([0.973] * 5) + task_id*np.array([0.003] * 5)
      
         print('*'*100)
         print('Task {:2d} ({:s})'.format(k,data[k]['name']))
