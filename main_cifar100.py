@@ -88,7 +88,7 @@ class AlexNet(nn.Module):
         for n, m in self.named_modules():
             if 'fc' in n or 'conv' in n:
                 print(f'layer {n}, next kernel size {m.next_ks}')
-        self.initialize()
+        # self.initialize()
     
     def initialize(self):
         for m in self.gpm_layers:
@@ -172,7 +172,7 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         loss = criterion(output[task_id], target)        
         loss.backward()
         optimizer.step()
-        model.normalize()
+        # model.normalize()
 
 def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_id):
     model.train()
@@ -203,7 +203,7 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
                 params.grad.data.fill_(0)
 
         optimizer.step()
-        model.normalize()
+        # model.normalize()
 
 def test(args, model, device, x, y, criterion, task_id):
     model.eval()
