@@ -21,28 +21,7 @@ import argparse,time
 import math
 from copy import deepcopy
 
-def initialize(m: nn.Module) -> None:
-    fan = m.weight.shape[0] * m.next_ks
-    # m.gain = torch.nn.init.calculate_gain('relu')
-    m.gain = torch.nn.init.calculate_gain('leaky_relu', math.sqrt(5))
-    m.bound = m.gain / math.sqrt(fan)
-    nn.init.normal_(m.weight, 0, m.bound)
-    if m.bias is not None:
-        nn.init.constant_(m.bias, 0)
-
-def normalize(m: nn.Module) -> None:
-    if len(m.weight.shape) == 4:
-        norm_dim = (1, 2, 3)
-        norm_view = (-1, 1, 1, 1)
-    else:
-        norm_dim = (1)
-        norm_view = (-1, 1)
-
-    with torch.no_grad():
-        # mean = self.weight.mean(dim=self.norm_dim).detach().view(self.norm_view)
-        var = m.weight.var(dim=norm_dim, unbiased=False).detach().sum() * m.next_ks
-        std = var ** 0.5
-        m.weight.data = m.gain * (m.weight.data) / std 
+negative_slope = math.sqrt(5)
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
@@ -82,6 +61,7 @@ class AlexNet(nn.Module):
         self.map.append(256*self.smid*self.smid)
         self.maxpool=torch.nn.MaxPool2d(2)
         self.relu=torch.nn.ReLU()
+        # self.relu=torch.nn.LeakyReLU(negative_slope=negative_slope)
         self.drop1=torch.nn.Dropout(0.2)
         self.drop2=torch.nn.Dropout(0.5)
 
@@ -108,7 +88,7 @@ class AlexNet(nn.Module):
     def initialize(self):
         for m in self.gpm_layers:
             fan = m.weight.shape[0] * m.next_ks
-            m.gain = torch.nn.init.calculate_gain('relu')
+            m.gain = torch.nn.init.calculate_gain('leaky_relu', negative_slope)
             m.bound = m.gain / math.sqrt(fan)
             nn.init.normal_(m.weight, 0, m.bound)
             if m.bias is not None:
