@@ -23,7 +23,7 @@ from copy import deepcopy
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 temperature = 0.1
 negative_slope = math.sqrt(5)
-feat_dim = 512
+feat_dim = 128
 wn = False
 cil = False
 
