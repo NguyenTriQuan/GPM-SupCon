@@ -234,7 +234,8 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
         output = model(data)
-        loss = criterion(output[task_id], target)        
+        output = F.normalize(output, dim=1)
+        loss = sup_con_loss(output, target)        
         loss.backward()
         optimizer.step()
         if wn:
@@ -251,9 +252,12 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         else: b=r[i:]
         data = x[b]
         data, target = data.to(device), y[b].to(device)
+        data = torch.cat([data, data], dim=0)
+        target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
         output = model(data)
-        loss = criterion(output[task_id], target)         
+        output = F.normalize(output, dim=1)
+        loss = sup_con_loss(output, target)       
         loss.backward()
         # Gradient Projections 
         kk = 0 
@@ -288,6 +292,11 @@ def test(args, model, device, x, y, criterion, task_id):
             data = x[b]
             data, target = data.to(device), y[b].to(device)
             output = model(data)
+            features_mean = model.features_mean[task_id*10: (task_id+1)*10]
+            output = F.normalize(output, dim=1)
+            features_mean = F.normalize(features_mean, dim=1)
+            predicts = torch.matmul(output, features_mean.T)
+
             loss = criterion(output[task_id], target)
             pred = output[task_id].argmax(dim=1, keepdim=True) 
             
