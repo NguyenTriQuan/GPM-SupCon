@@ -24,6 +24,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 temperature = 0.1
 negative_slope = math.sqrt(5)
 feat_dim = 512
+wn = True
 
 ## Define AlexNet model
 def compute_conv_output_size(Lin,kernel_size,stride=1,padding=0,dilation=1):
@@ -90,7 +91,8 @@ class AlexNet(nn.Module):
         for n, m in self.named_modules():
             if 'fc' in n or 'conv' in n:
                 print(f'layer {n}, next kernel size {m.next_ks}')
-        # self.initialize()
+        self.initialize()
+        self.features_mean = None
     
     def initialize(self):
         for m in self.gpm_layers:
@@ -184,7 +186,7 @@ def sup_con_loss(features, labels):
 
         return loss
 
-def get_classes_statistic(args, model, x, y, task_id):
+def get_classes_statistic(args, model, x, y, t):
         model.eval()
         features = []
         labels = []
@@ -204,23 +206,18 @@ def get_classes_statistic(args, model, x, y, task_id):
         features = torch.cat(features, dim=0)
         labels = torch.cat(labels, dim=0)
         features_mean = []
-        features_var = []
-        begin = t
-        end = self.ncla[-1]
+        begin = t*10
+        end = (t+1)*10
         for cla in range(begin, end):
             ids = (labels == cla)
             cla_features = features[ids]
             features_mean.append(cla_features.mean(0))
-            features_var.append(cla_features.var(0))
 
         features_mean = torch.stack(features_mean, dim=0).to(device)
-        features_var = torch.stack(features_var, dim=0).to(device)
-        if self.model.features_mean is None:
-            self.model.features_mean = features_mean # [num classes, feature dim]
-            self.model.features_var = features_var
+        if model.features_mean is None:
+            model.features_mean = features_mean # [num classes, feature dim]
         else:
-            self.model.features_mean = torch.cat([self.model.features_mean[:begin], features_mean], dim=0)
-            self.model.features_var = torch.cat([self.model.features_var[:begin], features_var], dim=0)
+            model.features_mean = torch.cat([model.features_mean[:begin], features_mean], dim=0)
         
 def train(args, model, device, x,y, optimizer,criterion, task_id):
     model.train()
@@ -233,12 +230,15 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         else: b=r[i:]
         data = x[b]
         data, target = data.to(device), y[b].to(device)
+        data = torch.cat([data, data], dim=0)
+        target = torch.cat([target, target], dim=0)
         optimizer.zero_grad()        
         output = model(data)
         loss = criterion(output[task_id], target)        
         loss.backward()
         optimizer.step()
-        # model.normalize()
+        if wn:
+            model.normalize()
 
 def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_id):
     model.train()
@@ -269,7 +269,8 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
                 params.grad.data.fill_(0)
 
         optimizer.step()
-        # model.normalize()
+        if wn:
+            model.normalize()
 
 def test(args, model, device, x, y, criterion, task_id):
     model.eval()
