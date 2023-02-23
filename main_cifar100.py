@@ -38,8 +38,8 @@ class AlexNet(nn.Module):
         self.map.append(32)
         self.conv1 = nn.Conv2d(3, 64, 4, bias=False)
         self.conv1.next_ks = 3
-        self.bn1 = nn.BatchNorm2d(64, track_running_stats=False, affine=bn_affine)
-        # self.bn1 = nn.Identity()
+        # self.bn1 = nn.BatchNorm2d(64, track_running_stats=False, affine=bn_affine)
+        self.bn1 = nn.Identity()
         s=compute_conv_output_size(32,4)
         s=s//2
         self.ksize.append(4)
@@ -47,16 +47,16 @@ class AlexNet(nn.Module):
         self.map.append(s)
         self.conv2 = nn.Conv2d(64, 128, 3, bias=False)
         self.conv2.next_ks = 2
-        self.bn2 = nn.BatchNorm2d(128, track_running_stats=False, affine=bn_affine)
-        # self.bn2 = nn.Identity()
+        # self.bn2 = nn.BatchNorm2d(128, track_running_stats=False, affine=bn_affine)
+        self.bn2 = nn.Identity()
         s=compute_conv_output_size(s,3)
         s=s//2
         self.ksize.append(3)
         self.in_channel.append(64)
         self.map.append(s)
         self.conv3 = nn.Conv2d(128, 256, 2, bias=False)
-        self.bn3 = nn.BatchNorm2d(256, track_running_stats=False, affine=bn_affine)
-        # self.bn3 = nn.Identity()
+        # self.bn3 = nn.BatchNorm2d(256, track_running_stats=False, affine=bn_affine)
+        self.bn3 = nn.Identity()
         s=compute_conv_output_size(s,2)
         s=s//2
         self.smid=s
@@ -72,12 +72,12 @@ class AlexNet(nn.Module):
         self.conv3.next_ks = self.smid
         self.fc1 = nn.Linear(256*self.smid*self.smid,2048, bias=False)
         self.fc1.next_ks = 1
-        self.bn4 = nn.BatchNorm1d(2048, track_running_stats=False, affine=bn_affine)
-        # self.bn4 = nn.Identity()
+        # self.bn4 = nn.BatchNorm1d(2048, track_running_stats=False, affine=bn_affine)
+        self.bn4 = nn.Identity()
         self.fc2 = nn.Linear(2048,2048, bias=False)
         self.fc2.next_ks = 1
-        self.bn5 = nn.BatchNorm1d(2048, track_running_stats=False, affine=bn_affine)
-        # self.bn5 = nn.Identity()
+        # self.bn5 = nn.BatchNorm1d(2048, track_running_stats=False, affine=bn_affine)
+        self.bn5 = nn.Identity()
         self.map.extend([2048])
         
         self.taskcla = taskcla
@@ -103,6 +103,7 @@ class AlexNet(nn.Module):
                 nn.init.constant_(m.bias, 0)
         
     def normalize(self):
+        scales = []
         with torch.no_grad():
             for m in self.gpm_layers:
                 if len(m.weight.shape) == 4:
@@ -115,7 +116,10 @@ class AlexNet(nn.Module):
                 # mean = m.weight.mean(dim=norm_dim).detach().view(norm_view)
                 var = m.weight.var(dim=norm_dim, unbiased=False).detach().sum() * m.next_ks
                 std = var ** 0.5
-                m.weight.data = m.gain * (m.weight.data) / std 
+                scale = m.gain / std
+                scales.append(scale)
+                m.weight.data = scale * m.weight.data
+        return scales
         
     def forward(self, x):
         bsz = deepcopy(x.size(0))
@@ -208,7 +212,9 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
 
         optimizer.step()
         if wn:
-            model.normalize()
+            scales = model.normalize()
+            for n, m in enumerate(model.gpm_layers[1:]):
+                feature_mat[n+1] = feature_mat[n+1] * (scales[n] ** 2)
 
 def test(args, model, device, x, y, criterion, task_id):
     model.eval()
