@@ -266,16 +266,13 @@ def get_classes_statistic(args, model, x, y, t):
         features = torch.cat(features, dim=0)
         labels = torch.cat(labels, dim=0)
         features_mean = []
-        for cla in range(0, 10):
+        for cla in range(0, 100):
             ids = (labels == cla)
             cla_features = features[ids]
             features_mean.append(cla_features.mean(0))
 
         features_mean = torch.stack(features_mean, dim=0).to(device)
-        if model.features_mean is None:
-            model.features_mean = features_mean # [num classes, feature dim]
-        else:
-            model.features_mean = torch.cat([model.features_mean[:t*10], features_mean], dim=0)
+        model.features_mean = features_mean
         
 def train(args, model, device, x, y, optimizer, criterion, task_id):
     model.train()
@@ -486,11 +483,11 @@ def main(args):
     ytest = []
     for k, ncla in taskcla:
         xtrain+=[data[k]['train']['x']]
-        ytrain+=[data[k]['train']['y']]
+        ytrain+=[data[k]['train']['y'] + k*10]
         xvalid+=[data[k]['valid']['x']]
-        yvalid+=[data[k]['valid']['y']]
+        yvalid+=[data[k]['valid']['y'] + k*10]
         xtest +=[data[k]['test']['x']]
-        ytest +=[data[k]['test']['y']]
+        ytest +=[data[k]['test']['y'] + k*10]
 
     xtrain = torch.cat(xtrain, dim=0)
     ytrain = torch.cat(ytrain, dim=0)
