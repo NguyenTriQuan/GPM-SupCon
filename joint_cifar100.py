@@ -478,19 +478,40 @@ def main(args):
 
     task_id = 0
     task_list = []
+    xtrain = []
+    ytrain = []
+    xvalid = []
+    yvalid = []
+    xtest = []
+    ytest = []
+    for k, ncla in taskcla:
+        xtrain+=[data[k]['train']['x']]
+        ytrain+=[data[k]['train']['y']]
+        xvalid+=[data[k]['valid']['x']]
+        yvalid+=[data[k]['valid']['y']]
+        xtest +=[data[k]['test']['x']]
+        ytest +=[data[k]['test']['y']]
+
+    xtrain = torch.cat(xtrain, dim=0)
+    ytrain = torch.cat(ytrain, dim=0)
+    xvalid = torch.cat(xvalid, dim=0)
+    yvalid = torch.cat(yvalid, dim=0)
+    xtest = torch.cat(xtest, dim=0)
+    ytest = torch.cat(ytest, dim=0)
     for k,ncla in taskcla:
         # specify threshold hyperparameter
+        if k > 0: break
         threshold = np.array([0.97] * 6) + task_id*np.array([0.003] * 6)
      
         print('*'*100)
         print('Task {:2d} ({:s})'.format(k,data[k]['name']))
         print('*'*100)
-        xtrain=data[k]['train']['x']
-        ytrain=data[k]['train']['y']
-        xvalid=data[k]['valid']['x']
-        yvalid=data[k]['valid']['y']
-        xtest =data[k]['test']['x']
-        ytest =data[k]['test']['y']
+        # xtrain=data[k]['train']['x']
+        # ytrain=data[k]['train']['y']
+        # xvalid=data[k]['valid']['x']
+        # yvalid=data[k]['valid']['y']
+        # xtest =data[k]['test']['x']
+        # ytest =data[k]['test']['y']
         task_list.append(k)
 
         lr = args.lr 
