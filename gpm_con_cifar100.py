@@ -323,17 +323,17 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
             loss = sup_con_loss(output, target, args.temperature)  
         loss.backward()
         # Gradient Projections 
-        kk = 0 
-        for k, (m,params) in enumerate(model.named_parameters()):
-            # if k<15 and len(params.size())!=1:
-            if 'last' not in m and len(params.size())!=1:
-                sz =  params.grad.data.size(0)
-                params.grad.data = params.grad.data - torch.mm(params.grad.data.view(sz,-1),\
-                                                        feature_mat[kk]).view(params.size())
-                kk +=1
-            # elif (k<15 and len(params.size())==1) and task_id !=0 :
-            elif 'last' not in m and task_id !=0 :
-                params.grad.data.fill_(0)
+        # kk = 0 
+        # for k, (m,params) in enumerate(model.named_parameters()):
+        #     # if k<15 and len(params.size())!=1:
+        #     if 'last' not in m and len(params.size())!=1:
+        #         sz =  params.grad.data.size(0)
+        #         params.grad.data = params.grad.data - torch.mm(params.grad.data.view(sz,-1),\
+        #                                                 feature_mat[kk]).view(params.size())
+        #         kk +=1
+        #     # elif (k<15 and len(params.size())==1) and task_id !=0 :
+        #     elif 'last' not in m and task_id !=0 :
+        #         params.grad.data.fill_(0)
 
         optimizer.step()
         if wn:
