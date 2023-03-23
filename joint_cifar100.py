@@ -495,6 +495,7 @@ def main(args):
     yvalid = torch.cat(yvalid, dim=0)
     xtest = torch.cat(xtest, dim=0)
     ytest = torch.cat(ytest, dim=0)
+    print(max(ytest))
     for k,ncla in taskcla:
         # specify threshold hyperparameter
         if k > 0: break

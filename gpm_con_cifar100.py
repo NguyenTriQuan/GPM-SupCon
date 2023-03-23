@@ -654,9 +654,9 @@ if __name__ == "__main__":
     parser.add_argument('--lr_factor', type=int, default=2, metavar='LRF',
                         help='lr decay factor (default: 2)')
     parser.add_argument('--feat_dim', type=int, default=512)
-    parser.add_argument('--temperature', type=float, default=0.1)
+    parser.add_argument('--temperature', type=float, default=0.3)
     parser.add_argument('--lamb', type=float, default=0)
-    parser.add_argument('--split_loss', type=int, default=0)
+    parser.add_argument('--split_loss', type=int, default=1)
 
     args = parser.parse_args()
     print('='*100)
